@@ -2,6 +2,9 @@ import hashlib
 from dataclasses import dataclass
 
 import structlog
+from sqlalchemy import select
+
+from core.models import IngestedSource
 
 from .chunking.strategy_selector import StrategySelector
 from .embeddings.batch_processor import BatchEmbeddingProcessor
@@ -78,7 +81,7 @@ class IngestionPipeline:
         )
 
         # Check if already ingested
-        skip_result = self._check_skip(source_id, "resume")
+        skip_result = self._check_skip(source_id, "resume", profile_id)
         if skip_result:
             return skip_result
 
@@ -154,7 +157,7 @@ class IngestionPipeline:
         )
 
         # Check if already ingested
-        skip_result = self._check_skip(source_id, "readme")
+        skip_result = self._check_skip(source_id, "readme", profile_id)
         if skip_result:
             return skip_result
 
@@ -230,7 +233,7 @@ class IngestionPipeline:
         )
 
         # Check if already ingested
-        skip_result = self._check_skip(source_id, "repo")
+        skip_result = self._check_skip(source_id, "repo", profile_id)
         if skip_result:
             return skip_result
 
@@ -285,20 +288,28 @@ class IngestionPipeline:
             content = content.encode()
         return hashlib.sha256(content).hexdigest()[:16]
 
-    def _check_skip(self, source_id: str, source_type: str) -> IngestResult | None:
+    def _dedupe_key(self, source_id: str) -> str:
+        """Full SHA256 of the source_id, stored in IngestedSource.content_hash."""
+        return hashlib.sha256(source_id.encode()).hexdigest()
+
+    def _check_skip(
+        self, source_id: str, source_type: str, profile_id: str
+    ) -> IngestResult | None:
         """
         Check if source has already been ingested.
 
         Returns IngestResult if should skip, None if should proceed.
         """
         try:
-            # Query database for existing source
-            # This assumes a table/model named IngestedSource
-            existing = (
-                self.db_session.query("IngestedSource")  # Placeholder - actual query depends on ORM
-                .filter_by(source_id=source_id)
-                .first()
-            )
+            existing = self.db_session.execute(
+                select(IngestedSource.id)
+                .where(
+                    IngestedSource.profile_id == profile_id,
+                    IngestedSource.source_type == source_type,
+                    IngestedSource.content_hash == self._dedupe_key(source_id),
+                )
+                .limit(1)
+            ).first()
 
             if existing:
                 logger.info("Source already ingested, skipping", source_id=source_id)
@@ -334,16 +345,24 @@ class IngestionPipeline:
             chunk_count: Number of chunks created
         """
         try:
-            # This is a placeholder for actual database recording
-            # In a real implementation, would create IngestedSource record
+            self.db_session.add(
+                IngestedSource(
+                    profile_id=profile_id,
+                    source_type=source_type,
+                    content_hash=self._dedupe_key(source_id),
+                    chunk_count=chunk_count,
+                )
+            )
+            self.db_session.commit()
             logger.info(
-                "Recording ingested source",
+                "Recorded ingested source",
                 source_id=source_id,
                 source_type=source_type,
                 profile_id=profile_id,
                 chunk_count=chunk_count,
             )
         except Exception as e:
+            self.db_session.rollback()
             logger.error(
                 "Failed to record ingested source",
                 source_id=source_id,
