@@ -292,9 +292,7 @@ class IngestionPipeline:
         """Full SHA256 of the source_id, stored in IngestedSource.content_hash."""
         return hashlib.sha256(source_id.encode()).hexdigest()
 
-    def _check_skip(
-        self, source_id: str, source_type: str, profile_id: str
-    ) -> IngestResult | None:
+    def _check_skip(self, source_id: str, source_type: str, profile_id: str) -> IngestResult | None:
         """
         Check if source has already been ingested.
 
