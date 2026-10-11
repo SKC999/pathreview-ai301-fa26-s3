@@ -9,6 +9,8 @@ from sqlalchemy.schema import CreateTable
 from core.models import IngestedSource
 from ingestion.pipeline import IngestionPipeline
 
+pytestmark = pytest.mark.unit
+
 PROFILE_ID = "8f2c1d4e-0b6a-4c3e-9a51-2d7f0e6b9c10"
 README = (
     "# demo-repo\n\nA small demo project for testing ingestion.\n\n"
@@ -33,9 +35,7 @@ def pipeline_parts(request):
         # Table only: the model declares each index twice, which SQLite rejects.
         conn.execute(CreateTable(IngestedSource.__table__))
     session = Session(engine)
-    collection = chromadb.EphemeralClient().get_or_create_collection(
-        f"dedup_{request.node.name}"
-    )
+    collection = chromadb.EphemeralClient().get_or_create_collection(f"dedup_{request.node.name}")
     embedder = CountingEmbedder()
     pipeline = IngestionPipeline(
         vector_db=collection, db_session=session, embedding_provider=embedder
@@ -77,9 +77,7 @@ def test_same_readme_for_another_profile_is_not_skipped(pipeline_parts):
     pipeline, _session, _collection, embedder = pipeline_parts
 
     pipeline.ingest_readme(PROFILE_ID, "demo-repo", README)
-    other = pipeline.ingest_readme(
-        "0d9e4b7a-3c21-4f8e-b6a2-91c5e7f3d482", "demo-repo", README
-    )
+    other = pipeline.ingest_readme("0d9e4b7a-3c21-4f8e-b6a2-91c5e7f3d482", "demo-repo", README)
 
     assert other.skipped is False
     assert embedder.calls == 2
